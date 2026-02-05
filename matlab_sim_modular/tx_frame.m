@@ -62,5 +62,11 @@ meta.pilot_density = pilot_density;
 meta.pilot_num = pilot_num;
 meta.ndata_zero = ndata_zero;
 meta.info_bits = info_bits;
+if mode.mod == "QPSK"
+    meta.M = 4;
+elseif mode.mod == "16QAM"
+    meta.M = 16;
+end
+meta.Rc = 1/3;
 meta.fd = mode.fd;
 end
