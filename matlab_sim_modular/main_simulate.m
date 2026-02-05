@@ -8,7 +8,7 @@ modes = ["wide","narrow","adaptive"];
 
 EbN0dB = 0:0.1:10;
 Nframes = 10;   % 可按算力调整
-scenario = "awgn_freqoffset"; % "awgn"|"rayleigh"|"burst_jam"|"awgn_freqoffset"
+scenario = "awgn_cfo"; % "awgn"|"awgn_cfo"|"rayleigh_flat"|"rician_flat"|"rayleigh_tdl"|"impulsive"|"burst_jam"
 
 results = struct();
 for mi = 1:numel(modes)
