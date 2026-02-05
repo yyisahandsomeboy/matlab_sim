@@ -9,26 +9,13 @@ entry = cfg.mcs_table(mcs_id+1);
 
 % ---- 参数派生 ----
 Fs_over  = cfg.Fs_over;
-symbolrate = mode.symbolrate;
+symbolrate = entry.Rs;
 Fs = Fs_over * symbolrate;
-
-% 导频密度灵活配置：优先 pilot_density（例如 1/32），
-% 也支持直接给 pilot_distance（例如 32）
-if isfield(mode, "pilot_density")
-    pilot_density = mode.pilot_density;
-    if pilot_density <= 0 || pilot_density > 1
-        error("pilot_density must be in (0,1]");
-    end
-    pilot_distance = max(2, round(1/pilot_density));
-elseif isfield(mode, "pilot_distance")
-    pilot_distance = mode.pilot_distance;
-    pilot_density = 1 / pilot_distance;
-else
-    error("Mode config must provide pilot_density or pilot_distance");
-end
+pilot_distance = entry.pilot_distance;
+pilot_density = 1 / pilot_distance;
 
 % ---- 同步字 ----
-sync_word = gen_syncword(cfg);      % 符号级同步字
+sync_word = gen_syncword(cfg);
 
 % ---- 数据 ----
 info_bits = randi([0 1], cfg.payload_bits, 1);
@@ -54,10 +41,8 @@ end
 % ---- 插入导频 ----
 [payload, pilot_num, ndata_zero] = insert_pilots(sym, cfg.pilot_word, pilot_distance);
 
-% ---- 拼帧 ----
-frame = [sync_word; payload(:)];   % 符号级（无过采样）
-
-% ---- 过采样（简单重复，保持与你现有代码一致） ----
+% ---- 拼帧与过采样 ----
+frame = [sync_word; payload(:)];
 tx_os = repelem(frame, Fs_over);
 
 % ---- meta ----
@@ -72,11 +57,8 @@ meta.pilot_density = pilot_density;
 meta.pilot_num = pilot_num;
 meta.ndata_zero = ndata_zero;
 meta.info_bits = info_bits;
-if mode.mod == "QPSK"
-    meta.M = 4;
-elseif mode.mod == "16QAM"
-    meta.M = 16;
-end
-meta.Rc = 1/3;
-meta.fd = mode.fd;
+meta.M = entry.M;
+meta.Rc = entry.Rc;
+meta.fd = entry.fd;
+meta.eta = entry.eta;
 end

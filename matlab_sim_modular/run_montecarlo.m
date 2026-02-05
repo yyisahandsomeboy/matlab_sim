@@ -35,9 +35,6 @@ for ei = 1:numel(EbN0dB)
         % 按场景补齐信道参数
         meta = make_channel_meta_profile(meta, scenario);
 
-        % 按场景补齐信道参数
-        meta = make_channel_meta_profile(meta, scenario);
-
         % 信道
         rx = channel_model(cfg, tx, ebn0, scenario, meta);
 

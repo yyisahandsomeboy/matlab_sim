@@ -1,215 +1,151 @@
-# 宽/窄带融合自适应通信系统 MATLAB 仿真说明
+# MATLAB 单载波复基带仿真说明（多档 MCS 自适应控制）
 
-本目录提供“宽/窄带融合自适应通信系统”的模块化仿真框架。
-
-- 目标：在不同信道场景下比较 `wide-only` / `narrow-only` / `adaptive` 三种策略的 BER、PER、吞吐率、切换次数。
-- 算法主链路：同步字 + 梳状导频 + 两级滤波 + 相位补偿 + Turbo 译码。
+本工程已升级为：**基于 SNR + PER 的 5 档 MCS 自适应切换控制器**，目标是“优先保证连通性，在满足误包率约束下平稳切换、避免抖动”。
 
 ---
 
 ## 1. 依赖与入口
 
 ### 1.1 依赖
-1) LTE Toolbox（`lteTurboEncode` / `lteTurboDecode`）
-2) 你已有函数：`cacode_503.m`、`fir7.m`、`fir8.m`
+- LTE Toolbox：`lteTurboEncode` / `lteTurboDecode`
+- 本目录内函数：`cacode_503.m`, `fir7.m`, `fir8.m`
 
 ### 1.2 运行入口
-在 MATLAB 当前目录切到 `matlab_sim_modular/` 后运行：
-
 ```matlab
+cd matlab_sim_modular
 main_simulate
 ```
 
 ---
 
-## 2. 当前默认体制参数（已按你的定义）
+## 2. MCS 固定档位定义（0..4）
 
-在 `default_config.m` 中：
+由 `default_config.m` 中 `cfg.mcs_table` 定义：
 
-- 窄带：`QPSK + 1 kSym/s + 30 Hz CFO`
-- 宽带：`16QAM + 13.75 MSym/s + 1030 Hz CFO`
-- 导频密度：按模式独立配置，支持
-  - `pilot_density`（推荐，例如 `1/32`）
-  - `pilot_distance`（兼容旧配置）
+- MCS0: QPSK, Rs=1e3,    Rc=1/3, pilot_distance=2
+- MCS1: QPSK, Rs=200e3,  Rc=1/3, pilot_distance=4
+- MCS2: QPSK, Rs=3200e3, Rc=1/2, pilot_distance=32
+- MCS3: QPSK, Rs=13.5e6, Rc=1/2, pilot_distance=32
+- MCS4: 16QAM,Rs=13.5e6, Rc=1/2, pilot_distance=32
+
+定义：
+- **窄带** = MCS0
+- **宽带** = MCS4
+- **自适应模式** = 在 MCS0..MCS4 之间切换
 
 ---
 
-## 3. 如何切换“不同信道场景”仿真
+## 3. 自适应控制器设计
 
-### 3.1 在哪里改场景
-`main_simulate.m` 里这一行控制信道类型：
-
+核心函数：
 ```matlab
-scenario = "awgn_freqoffset";
+[st, dbg] = update_mcs_controller(cfg, st, metrics)
 ```
 
-可改成：
+### 3.1 状态 `st`
+- `st.mcs`：当前 MCS（0..4）
+- `st.snr_f`, `st.per_f`：EMA 平滑后的 SNR/PER
+- `st.up_cnt`, `st.dn_cnt`：升级/降级确认计数
+- `st.lock`：冷却计数（`lock>0` 禁止升级）
+- `st.reason`：最近切换原因
 
-- `"awgn"`
-- `"awgn_cfo"`（兼容 `"awgn_freqoffset"`）
-- `"rayleigh_flat"`（兼容 `"rayleigh"`）
-- `"rician_flat"`
-- `"rayleigh_tdl"`
-- `"impulsive"`
-- `"burst_jam"`
+### 3.2 输入 `metrics`
+每帧更新一次，包含：
+- `metrics.snr_est`：当前帧 SNR 估计
+- `metrics.per`：当前滑窗 PER（推荐最近 W 帧）
+- `metrics.sync_fail`：同步失败标志（可选）
+- `metrics.eq_fail`：均衡失败标志（可选）
 
-### 3.2 场景参数怎么传入
-当前工程在 `run_montecarlo.m` 中每帧调用：
+### 3.3 策略
+A) **紧急降级（连通性优先）**
+- 若 `per_f > emerg_per` 或连续 `sync_fail/eq_fail >= K`，立即降级（严重失锁直接 MCS0）。
 
+B) **正常选择（可行集合 + goodput 最大化）**
+- 可行条件：`snr_f >= gamma_dn(i)` 且 `per_f <= per_max(i)`。
+- 计算：
+  `raw_rate_i = Rs_i * log2(M_i) * Rc_i * eta_i`
+  `goodput_i  = raw_rate_i * (1 - per_f)`
+- 取可行集中 goodput 最大的候选 MCS。
+
+C) **平稳切换（防抖）**
+- 升级：需 `lock==0` 且更严格门限（`gamma_up`），并连续 `N_up` 帧确认。
+- 降级：连续 `N_dn` 帧确认（比升级更快）。
+- 切换后设置 `lock_len_switch`，防止立刻反向切回。
+
+---
+
+## 4. 关键配置参数（`cfg.ctrl`）
+
+在 `default_config.m`：
+- `ema_snr_alpha`, `ema_per_alpha`
+- `per_tgt`, `emerg_per`
+- `N_up`, `N_dn`
+- `lock_len_emerg`, `lock_len_switch`
+- `goodput_hyst`, `use_goodput_gate`
+- `gamma_up[1x5]`, `gamma_dn[1x5]`, `per_max[1x5]`
+- `per_window`, `fail_K`
+
+> 注意：`gamma_up/gamma_dn/per_max` 目前是初始值，建议通过离线 sweep 标定。
+
+---
+
+## 5. 信道场景使用（`scenario`）
+
+在 `main_simulate.m` 中配置：
+```matlab
+scenario = "awgn_cfo";
+```
+
+支持：
+- `awgn`
+- `awgn_cfo`（兼容 `awgn_freqoffset`）
+- `rayleigh_flat`
+- `rician_flat`
+- `rayleigh_tdl`
+- `impulsive`
+- `burst_jam`
+
+每帧会自动调用：
 ```matlab
 meta = make_channel_meta_profile(meta, scenario);
 rx = channel_model(cfg, tx, ebn0, scenario, meta);
 ```
 
-也就是说：
-- `tx_frame` 先给出基础 `meta`（`Fs/Fs_over/M/Rc/fd/...`）。
-- `make_channel_meta_profile` 按 `scenario` 自动补充缺省参数。
-- `channel_model` 使用这些参数生成对应信道。
+---
+
+## 6. 导频与 eta（帧效率）
+
+- `pilot_distance` 越小，导频越密，估计/跟踪更稳，但开销更大、`eta` 更低。
+- 本工程在 `cfg.mcs_table` 中预置 `eta`，用于控制器 goodput 评估。
+- `eta` 是结合导频密度与同步头固定开销的估计值。
 
 ---
 
-## 4. 每种信道的含义与参数
+## 7. 重要工程注意事项（已在代码处理）
 
-下表是 `channel_model.m` 支持的场景与关键 `meta` 字段。
+1) **PER 滑窗混合污染**：
+   控制器为每个 MCS 维护独立历史 `per_hist_by_mcs`，切换后使用新 MCS 窗口。
 
-### 4.1 `awgn`
-- 含义：纯 AWGN
-- 关键参数：
-  - `M`、`Rc`（用于 Eb/N0 -> Es/N0 噪声标定）
-  - `noise_mode='esn0'`（默认）或 `'measured_snr'`
+2) **门限离线标定**：
+   `gamma_up/gamma_dn/per_max` 仅为起始建议，需按链路目标做 sweep。
 
-### 4.2 `awgn_cfo` / `awgn_freqoffset`
-- 含义：AWGN + 载波频偏
-- 关键参数：
-  - `fd`（Hz）
-  - 可选 `fd_residual`
-  - 可选相位噪声：`enable_phase_noise`、`phase_noise_sigma`
+3) **计数按帧统一**：
+   `N_up/N_dn/lock` 均为“帧”为单位，避免不同 Rs 下逻辑失真。
 
-### 4.3 `rayleigh_flat` / `rayleigh`
-- 含义：平坦 Rayleigh 衰落
-- 关键参数：
-  - `fade_mode='block'`（每帧一个复系数）
-  - 或 `fade_mode='slow'`（一阶 AR 慢变）
-  - `fade_rho`（slow 模式相关系数）
-
-### 4.4 `rician_flat`
-- 含义：平坦 Rician 衰落
-- 关键参数：
-  - `K_dB`（莱斯 K 因子）
-
-### 4.5 `rayleigh_tdl`
-- 含义：多径 Rayleigh TDL（抽头延迟线）
-- 关键参数：
-  - `taps_delay_samples`（**样点**单位）
-  - `taps_gain_dB`
-
-> 说明（宽带 vs 窄带差异）：
-> 本模型中延迟用“样点”定义，`Fs` 越高，同样长度信号内可解析的时延结构越细；当 `Rs` 高（宽带）时，多径对相邻符号影响更容易体现为明显 ISI/频率选择性；当 `Rs` 低（窄带）时，通常更接近平坦衰落。工程里 `make_channel_meta_profile.m` 已给出宽带/窄带不同默认抽头模板。
-
-### 4.6 `impulsive`
-- 含义：点状脉冲干扰
-- 关键参数：
-  - `imp_prob`（脉冲出现概率）
-  - `imp_amp`（脉冲幅度）
-
-### 4.7 `burst_jam`
-- 含义：突发段干扰（整段污染）
-- 关键参数：
-  - `jam_prob`（触发突发概率）
-  - `burst_len_range=[Lmin Lmax]`
-  - `jam_amp`
-  - `jam_type='noise'|'tone'`
-  - 若 `tone`，还需 `jam_tone_freq`
+4) **字符串兼容性**：
+   模式判断统一使用 `strcmpi/string`，避免 `==` 造成兼容问题。
 
 ---
 
-## 5. 噪声标定方式（重要）
+## 8. 文件分工
 
-`channel_model` 默认使用 `Es/N0` 标定（论文常用且可复现）：
-
-1) 若 `meta.norm_tx=true`，先归一化发射信号（`Es≈1`）并记录 `truth.scale`
-2) `EsN0dB = EbN0dB + 10*log10(log2(M)*Rc)`
-3) 复高斯噪声方差：
-   \[
-   \sigma^2 = \frac{E_s}{2\cdot 10^{EsN0/10}}
-   \]
-
-可选：`meta.noise_mode='measured_snr'`，此时使用 `meta.SNRdB` 直接控制输出 SNR。
-
----
-
-## 6. 结果怎么看
-
-运行 `main_simulate` 后会输出并绘图：
-
-- BER 曲线（wide/narrow/adaptive）
-- 吞吐率曲线（wide/narrow/adaptive）
-- 自适应模式切换次数 `SwitchCount`
-
-其中自适应策略在 `update_controller.m`：
-- 基于 `snr_est` 与 `per` 做门限+迟滞切换
-- 支持“紧急降级”机制
-
----
-
-## 7. 常见使用示例
-
-### 示例 A：只测 AWGN（无 CFO）
-```matlab
-scenario = "awgn";
-main_simulate
-```
-
-### 示例 B：测 AWGN+CFO
-```matlab
-scenario = "awgn_cfo";
-main_simulate
-```
-
-### 示例 C：测平坦 Rayleigh 慢变
-在 `make_channel_meta_profile.m` 的 `rayleigh_flat` 分支中设置：
-```matlab
-meta.fade_mode = 'slow';
-meta.fade_rho = 0.995;
-```
-然后：
-```matlab
-scenario = "rayleigh_flat";
-main_simulate
-```
-
-### 示例 D：测多径 TDL（观察宽窄带差异）
-```matlab
-scenario = "rayleigh_tdl";
-main_simulate
-```
-可在 `make_channel_meta_profile.m` 里自定义抽头：
-```matlab
-meta.taps_delay_samples = [0 2 5 9];
-meta.taps_gain_dB = [0 -3 -8 -12];
-```
-
-### 示例 E：测突发干扰
-```matlab
-scenario = "burst_jam";
-main_simulate
-```
-可在 `make_channel_meta_profile.m` 设置：
-```matlab
-meta.jam_prob = 0.05;
-meta.burst_len_range = [128 512];
-meta.jam_amp = 3;
-meta.jam_type = 'noise';   % 或 'tone'
-```
-
----
-
-## 8. 文件分工建议
-
-- `default_config.m`：系统体制与控制参数
-- `tx_frame.m`：发帧与 meta 基础字段生成
-- `make_channel_meta_profile.m`：场景参数模板（推荐先改这里）
-- `channel_model.m`：具体信道实现
-- `rx_frame.m`：接收与性能指标
-- `run_montecarlo.m`：总仿真循环与统计
+- `default_config.m`：MCS 表 + 控制参数
+- `init_mcs_controller.m`：控制器状态初始化
+- `update_mcs_controller.m`：多档 MCS 切换策略核心
+- `run_montecarlo.m`：仿真主循环 + 控制器调用
+- `tx_frame.m`：按 MCS 组帧（支持 0..4 / narrow / wide）
+- `resolve_mcs_id.m`：模式到 MCS 索引解析（独立函数，便于复用）
+- `rx_frame.m`：接收与性能统计（按 `meta.M/meta.Rc` 计算吞吐）
+- `channel_model.m`：多场景信道实现
+- `make_channel_meta_profile.m`：场景参数模板
 
