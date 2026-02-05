@@ -6,3 +6,9 @@
 运行入口：
 1) 先把 cacode_503.m, fir7.m, fir8.m 放到同一目录或 MATLAB path。
 2) 运行 main_simulate.m
+
+
+当前默认体制参数：
+- 窄带：QPSK + 1 kSym/s + 30 Hz 频偏
+- 宽带：16QAM + 13.75 MSym/s + 1030 Hz 频偏
+- 导频密度可在 default_config.m 中按模式独立修改（pilot_density 或 pilot_distance）。
