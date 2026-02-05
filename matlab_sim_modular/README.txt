@@ -149,3 +149,21 @@ rx = channel_model(cfg, tx, ebn0, scenario, meta);
 - `channel_model.m`：多场景信道实现
 - `make_channel_meta_profile.m`：场景参数模板
 
+
+
+## 9. Turbo 码率匹配（论文级实现）
+
+当前工程已将 `Rc=1/2` 从“截断近似”替换为“标准化打孔/恢复”流程：
+- 发端：`lteTurboEncode` 产生母码（约1/3），再调用 `turbo_rate_match.m`
+- 收端：先调用 `turbo_rate_recover.m` 还原母码 LLR，再 `lteTurboDecode`
+
+实现细节：
+- `Rc=1/3`：不打孔
+- `Rc=1/2`：保留全部系统位，校验位按 parity1/parity2 交替保留，尾比特（12比特）全保留
+- 未发送校验位在接收端以 0-LLR（擦除）填充
+
+相关文件：
+- `turbo_rate_match.m`
+- `turbo_rate_recover.m`
+- `tx_frame.m`（发送端接入）
+- `rx_frame.m`（接收端恢复）

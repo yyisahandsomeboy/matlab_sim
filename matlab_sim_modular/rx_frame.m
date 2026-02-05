@@ -62,7 +62,14 @@ else
     llr = reshape([b1, b2, b3, b4].', [], 1);
 end
 
-dec = lteTurboDecode(llr);
+% 码率恢复：将接收LLR还原到Turbo母码长度
+if isfield(meta, "turbo_N_mother")
+    llr_dec = turbo_rate_recover(llr, meta.Rc, meta.turbo_N_mother);
+else
+    llr_dec = llr;
+end
+
+dec = lteTurboDecode(llr_dec);
 dec_bits = double(dec(:));
 
 % ---- 指标估计 ----

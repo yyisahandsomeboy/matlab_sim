@@ -19,15 +19,11 @@ sync_word = gen_syncword(cfg);
 
 % ---- 数据 ----
 info_bits = randi([0 1], cfg.payload_bits, 1);
-coded_all = lteTurboEncode(info_bits');
-coded_all = double(coded_all(:));
+coded_mother = lteTurboEncode(info_bits');
+coded_mother = double(coded_mother(:));
 
-% 注：LTE Turbo编码默认约1/3码率。
-% 为兼容固定MCS表中的Rc=1/2档，这里采用简化截断近似实现等效码率。
-% 若需论文级严谨，请替换为标准速率匹配/打孔方案。
-Ncoded_tgt = max(8, floor(numel(info_bits) / entry.Rc));
-Ncoded_tgt = min(Ncoded_tgt, numel(coded_all));
-coded = coded_all(1:Ncoded_tgt);
+% 论文级严谨：使用标准化速率匹配/打孔
+[coded, rm] = turbo_rate_match(coded_mother, entry.Rc);
 
 % ---- 调制 ----
 if entry.M == 4
@@ -61,4 +57,7 @@ meta.M = entry.M;
 meta.Rc = entry.Rc;
 meta.fd = entry.fd;
 meta.eta = entry.eta;
+meta.turbo_rm = rm;
+meta.turbo_N_mother = rm.N_mother;
+meta.turbo_N_tx = rm.N_tx;
 end
