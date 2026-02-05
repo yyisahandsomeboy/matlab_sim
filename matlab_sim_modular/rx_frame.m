@@ -46,7 +46,7 @@ data_only = reshape(mat(2:end,:), 1, []);
 data_only = data_only(1:end-meta.ndata_zero);
 % ---- 软解调（与原脚本一致：实/虚部作为 LLR） ----
 llr = [];
-if meta.mode == "narrow"   % QPSK：2bit/sym
+if meta.M == 4   % QPSK：2bit/sym
     llr = reshape([real(data_only); imag(data_only)], 1, []);
 else
     % 16QAM 的严格 LLR 需要噪声方差；这里给出简化版本（论文中需说明近似）
@@ -62,7 +62,14 @@ else
     llr = reshape([b1, b2, b3, b4].', [], 1);
 end
 
-dec = lteTurboDecode(llr);
+% 码率恢复：将接收LLR还原到Turbo母码长度
+if isfield(meta, "turbo_N_mother")
+    llr_dec = turbo_rate_recover(llr, meta.Rc, meta.turbo_N_mother);
+else
+    llr_dec = llr;
+end
+
+dec = lteTurboDecode(llr_dec);
 dec_bits = double(dec(:));
 
 % ---- 指标估计 ----
@@ -73,11 +80,16 @@ e = pilot_est - p;
 snr_est = 10*log10(mean(abs(p)^2) / var(e));
 
 % 吞吐率（bit/s）：符号速率 * bits/sym * Rc * (1-导频开销) * (1-PER)
-k = (meta.mode=="wide")*4 + (meta.mode=="narrow")*2;
-Rc = 1/3;
-Op = 1/Dp;  % comb pilot开销
+k = log2(meta.M);
+Rc = meta.Rc;
+if isfield(meta, "eta")
+    eta = meta.eta;
+else
+    Op = 1/Dp;
+    eta = (1-Op);
+end
 PER = any(dec_bits ~= meta.info_bits);
-throughput = meta.symbolrate * k * Rc * (1-Op) * (1-PER);
+throughput = meta.symbolrate * k * Rc * eta * (1-PER);
 
 metrics = struct();
 metrics.snr_est = snr_est;
