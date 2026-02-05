@@ -1,9 +1,11 @@
+function [tx_os, meta] = tx_frame(cfg, mode_sel)
+%TX_FRAME 生成一帧发射信号
+% mode_sel 支持：
+% - 字符串/字符："wide"|"narrow"
+% - 数值：MCS索引 0..4
 
-function [tx_os, meta] = tx_frame(cfg, mode_name)
-% 输出：过采样后的复基带帧 tx_os
-% meta：记录信息比特、模式、导频参数等，供接收端与统计使用
-
-mode = cfg.mode.(mode_name);
+mcs_id = resolve_mcs_id(mode_sel);
+entry = cfg.mcs_table(mcs_id+1);
 
 % ---- 参数派生 ----
 Fs_over  = cfg.Fs_over;
@@ -30,16 +32,23 @@ sync_word = gen_syncword(cfg);      % 符号级同步字
 
 % ---- 数据 ----
 info_bits = randi([0 1], cfg.payload_bits, 1);
-coded = lteTurboEncode(info_bits');    % 输出行向量
-coded = double(coded(:));              % 列向量
+coded_all = lteTurboEncode(info_bits');
+coded_all = double(coded_all(:));
+
+% 注：LTE Turbo编码默认约1/3码率。
+% 为兼容固定MCS表中的Rc=1/2档，这里采用简化截断近似实现等效码率。
+% 若需论文级严谨，请替换为标准速率匹配/打孔方案。
+Ncoded_tgt = max(8, floor(numel(info_bits) / entry.Rc));
+Ncoded_tgt = min(Ncoded_tgt, numel(coded_all));
+coded = coded_all(1:Ncoded_tgt);
 
 % ---- 调制 ----
-if mode.mod == "QPSK"
+if entry.M == 4
     sym = mod_qpsk(coded);
-elseif mode.mod == "16QAM"
+elseif entry.M == 16
     sym = mod_16qam_gray(coded);
 else
-    error("Unsupported modulation");
+    error('Unsupported M in mcs table: %g', entry.M);
 end
 
 % ---- 插入导频 ----
@@ -53,7 +62,8 @@ tx_os = repelem(frame, Fs_over);
 
 % ---- meta ----
 meta = struct();
-meta.mode = mode_name;
+meta.mode = char(entry.name);
+meta.mcs = mcs_id;
 meta.Fs = Fs;
 meta.Fs_over = Fs_over;
 meta.symbolrate = symbolrate;

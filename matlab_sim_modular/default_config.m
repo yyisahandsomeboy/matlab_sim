@@ -1,4 +1,3 @@
-
 function cfg = default_config()
 % 默认配置：
 % 窄带：QPSK + 1 kSym/s + 30 Hz 频偏
@@ -36,4 +35,12 @@ cfg.ctrl.N_hold   = 3;   % 连续满足条件的帧数
 cfg.ctrl.emerg_per = 0.2; % 紧急降级 PER 阈值
 cfg.ctrl.fd       = 1030;%宽带时不需要补偿频偏
 
+m = struct();
+m.name = char(name);
+m.M = M;
+m.Rs = Rs;
+m.Rc = Rc;
+m.pilot_distance = pilot_distance;
+m.fd = fd;
+m.eta = eta;
 end
