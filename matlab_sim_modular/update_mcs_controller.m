@@ -17,7 +17,7 @@ function [st, dbg] = update_mcs_controller(cfg, st, metrics)
 
 % ---------------- 参数读取与兼容 ----------------
 snr_est = metrics.snr_est;
-per_in = metrics.per;
+per_in = metrics.per;                 % 建议传入当前帧pkt_err(0/1)
 sync_fail = get_metric_flag(metrics, 'sync_fail');
 eq_fail = get_metric_flag(metrics, 'eq_fail');
 
@@ -36,7 +36,8 @@ if ~isfield(st, 'hist_mcs') || st.hist_mcs ~= st.mcs
 end
 
 % 当前MCS窗口更新
-st.per_hist = [st.per_hist(:).', per_in];
+% 仅将当前帧误包(0/1)纳入当前MCS窗口
+st.per_hist = [st.per_hist(:).', double(per_in ~= 0)];
 if numel(st.per_hist) > cfg.ctrl.per_window
     st.per_hist = st.per_hist(end-cfg.ctrl.per_window+1:end);
 end
@@ -50,6 +51,18 @@ else
     st.snr_f = (1-cfg.ctrl.ema_snr_alpha)*st.snr_f + cfg.ctrl.ema_snr_alpha*snr_est;
 end
 st.per_f = (1-cfg.ctrl.ema_per_alpha)*st.per_f + cfg.ctrl.ema_per_alpha*per_win;
+
+% 当前MCS独立PER-EMA（用于候选MCS预测）
+if ~isfield(st, 'per_ema_by_mcs') || numel(st.per_ema_by_mcs) ~= 5
+    st.per_ema_by_mcs = nan(5,1);
+end
+idx_cur_mcs = st.mcs + 1;
+if ~isfinite(st.per_ema_by_mcs(idx_cur_mcs))
+    st.per_ema_by_mcs(idx_cur_mcs) = per_win;
+else
+    st.per_ema_by_mcs(idx_cur_mcs) = (1-cfg.ctrl.ema_per_alpha)*st.per_ema_by_mcs(idx_cur_mcs) + ...
+                                 cfg.ctrl.ema_per_alpha*per_win;
+end
 
 % 连续失败计数
 if sync_fail > 0, st.sync_fail_cnt = st.sync_fail_cnt + 1; else, st.sync_fail_cnt = 0; end
@@ -96,8 +109,16 @@ end
 % ---------------- B) 可行集合 + goodput ----------------
 for i = 0:4
     idx = i+1;
+
+    % 候选MCS的预测PER：优先使用该MCS历史EMA；若无历史则退化为当前per_f
+    per_pred = st.per_f;
+    if isfield(st, 'per_ema_by_mcs') && numel(st.per_ema_by_mcs) >= idx && isfinite(st.per_ema_by_mcs(idx))
+        per_pred = st.per_ema_by_mcs(idx);
+    end
+    per_pred = min(max(per_pred, 0), 1);
+
     ok = (st.snr_f >= cfg.ctrl.gamma_dn(idx)) && ...
-         (st.per_f <= cfg.ctrl.per_max(idx)) && ...
+         (per_pred <= cfg.ctrl.per_max(idx)) && ...
          (st.sync_fail_cnt < cfg.ctrl.fail_K) && ...
          (st.eq_fail_cnt < cfg.ctrl.fail_K);
     dbg.feasible(idx) = ok;
@@ -105,7 +126,7 @@ for i = 0:4
     if ok
         entry = cfg.mcs_table(idx);
         raw_rate = entry.Rs * log2(entry.M) * entry.Rc * entry.eta;
-        dbg.goodput(idx) = raw_rate * (1 - st.per_f);
+        dbg.goodput(idx) = raw_rate * (1 - per_pred);
     end
 end
 
@@ -137,7 +158,7 @@ if best_set > cur
 
     up_ok = (st.lock == 0) && ...
             (st.snr_f >= cfg.ctrl.gamma_up(idx_best)) && ...
-            (st.per_f <= cfg.ctrl.per_max(idx_best));
+            (dbg.goodput(idx_best) > -inf);
 
     if cfg.ctrl.use_goodput_gate
         up_ok = up_ok && (gp_new > gp_cur * (1 + cfg.ctrl.goodput_hyst));

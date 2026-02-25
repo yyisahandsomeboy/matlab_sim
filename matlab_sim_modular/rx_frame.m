@@ -77,7 +77,12 @@ dec_bits = double(dec(:));
 p = cfg.pilot_word;
 pilot_est = comp(1:Dp:end);         % 补偿后的导频
 e = pilot_est - p;
-snr_est = 10*log10(mean(abs(p)^2) / var(e));
+noise_var = var(e);
+if ~isfinite(noise_var) || noise_var <= 0
+    snr_est = -inf;
+else
+    snr_est = 10*log10(mean(abs(p)^2) / noise_var);
+end
 
 % 吞吐率（bit/s）：符号速率 * bits/sym * Rc * (1-导频开销) * (1-PER)
 k = log2(meta.M);
@@ -95,5 +100,9 @@ metrics = struct();
 metrics.snr_est = snr_est;
 metrics.per = PER;
 metrics.throughput = throughput;
+
+% 失效标志（供自适应控制器紧急通道使用）
+metrics.sync_fail = double(numel(r_hat) <= Ls || any(~isfinite(payload)));
+metrics.eq_fail = double(any(~isfinite(hhat)) || any(~isfinite(comp)) || ~isfinite(snr_est));
 
 end
