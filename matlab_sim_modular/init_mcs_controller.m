@@ -14,6 +14,7 @@ st.sync_fail_cnt = 0;
 st.eq_fail_cnt = 0;
 st.per_hist = [];
 st.per_hist_by_mcs = cell(5,1);  % 防止跨MCS PER污染
+st.per_ema_by_mcs = nan(5,1);    % 为每个MCS维护PER平滑估计（用于候选预测）
 st.hist_mcs = st.mcs;
 st.per_window = cfg.ctrl.per_window;
 end

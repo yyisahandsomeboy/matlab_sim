@@ -61,9 +61,18 @@ for ei = 1:numel(EbN0dB)
             prev_mcs = ctrl_state.mcs;
             ctrl_metrics = struct();
             ctrl_metrics.snr_est = metrics.snr_est;
-            ctrl_metrics.per = mean(per_hist);
-            ctrl_metrics.sync_fail = 0;
-            ctrl_metrics.eq_fail = 0;
+            % 控制器输入使用“当前帧误包(0/1)”，避免重复平滑与跨MCS污染
+            ctrl_metrics.per = pkt_err;
+            if isfield(metrics, 'sync_fail')
+                ctrl_metrics.sync_fail = metrics.sync_fail;
+            else
+                ctrl_metrics.sync_fail = 0;
+            end
+            if isfield(metrics, 'eq_fail')
+                ctrl_metrics.eq_fail = metrics.eq_fail;
+            else
+                ctrl_metrics.eq_fail = 0;
+            end
 
             [ctrl_state, ~] = update_mcs_controller(cfg, ctrl_state, ctrl_metrics);
             if ctrl_state.mcs ~= prev_mcs
